@@ -31,6 +31,7 @@ from model import GPTConfig, GPT
  
 from transformer_nuggets.utils.benchmark import profiler
 from pathlib import Path
+from torch.nn.attention import sdpa_kernel, SDPBackend
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -292,7 +293,11 @@ while True:
 
     # forward backward update, with optional gradient accumulation to simulate larger batch size
     # and using the GradScaler if data type is float16
-    with profiler(Path("cudnn_attention_nightly")):
+    sdp_backend = SDPBackend.FLASH_ATTENTION
+    base_context = sdpa_kernel(sdp_backend)
+    context = profiler(Path(f"{sdp_backend.name}_2_5"))
+    # context = nullcontext()
+    with base_context as b, context as c:
         for micro_step in range(gradient_accumulation_steps):
             if ddp:
                 # in DDP training we only need to sync gradients at the last micro step.
