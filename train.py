@@ -29,6 +29,12 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from model import GPTConfig, GPT
 
+HAS_AO = False
+try:
+    from torchao.float8 import convert_to_float8_training
+    HAS_AO = True
+except ImportError:
+    print("torchao not found, float8 training will not be available")
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
@@ -72,6 +78,7 @@ backend = 'nccl' # 'nccl', 'gloo', etc.
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
+low_p_train = ''
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
@@ -191,6 +198,15 @@ if block_size < model.config.block_size:
     model.crop_block_size(block_size)
     model_args['block_size'] = block_size # so that the checkpoint will have the right value
 model.to(device)
+
+# # float8 training
+if HAS_AO and config["low_p_train"]:
+    assert config["low_p_train"] == "float8", "float8 training is only supported for low_p_train=float8"
+    print("Using TorchAO to convert to float8 training")
+    convert_to_float8_training(model, module_filter_fn=lambda mod, fqn: fqn != "lm_head",)
+
+
+# float16 conversion
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
